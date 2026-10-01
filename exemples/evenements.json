@@ -1,0 +1,4 @@
+[
+  { "nom": "Stage d'observation", "debut": "2026-12-07", "fin": "2026-12-11", "heure": "08:00", "heureFin": "17:00", "icone": "briefcase", "enfant": "Léa" },
+  { "nom": "Dentiste", "label": "Rendez-vous", "debut": "2026-10-21", "heure": "14:30", "icone": "alarm", "enfant": "Tom" }
+]

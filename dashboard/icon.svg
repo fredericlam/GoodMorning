@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0c7a52"/><stop offset=".55" stop-color="#00623f"/><stop offset="1" stop-color="#1e3932"/></linearGradient>
+ <radialGradient id="halo" cx=".5" cy=".55" r=".42"><stop offset="0" stop-color="#d4e9e2" stop-opacity=".35"/><stop offset="1" stop-color="#d4e9e2" stop-opacity="0"/></radialGradient>
+ <linearGradient id="cup" x1="0" x2="1"><stop offset="0" stop-color="#fffaf2"/><stop offset=".7" stop-color="#f3eadb"/><stop offset="1" stop-color="#e4d6c0"/></linearGradient>
+ <linearGradient id="sleeve" x1="0" x2="1"><stop offset="0" stop-color="#c79a6b"/><stop offset=".7" stop-color="#b3835a"/><stop offset="1" stop-color="#9c6f49"/></linearGradient>
+ <linearGradient id="lid" x1="0" x2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9e1d3"/></linearGradient>
+</defs>
+<rect width="512" height="512" fill="url(#bg)"/>
+<circle cx="256" cy="290" r="215" fill="url(#halo)"/>
+<!-- grains de café -->
+<g fill="#3b2418" opacity=".55"><ellipse cx="74" cy="430" rx="26" ry="18" transform="rotate(-35 74 430)"/><ellipse cx="444" cy="78" rx="22" ry="15" transform="rotate(30 444 78)"/><ellipse cx="430" cy="448" rx="17" ry="12" transform="rotate(-20 430 448)"/></g>
+<g fill="none" stroke="#1e3932" stroke-width="3" opacity=".7" stroke-linecap="round"><path d="M58 441q16-9 32-22" /><path d="M432 86q8-7 24-16"/><path d="M421 453q6-4 18-11"/></g>
+<!-- vapeur -->
+<g fill="none" stroke="#f3eadb" stroke-width="13" stroke-linecap="round" opacity=".85">
+ <path d="M214 104c-18-20 18-30 0-52"/><path d="M256 96c-18-20 18-30 0-56"/><path d="M298 104c-18-20 18-30 0-52"/>
+</g>
+<!-- gobelet -->
+<path d="M166 176h180l-26 262q-2 20-22 20h-84q-20 0-22-20z" fill="url(#cup)"/>
+<path d="M176 262h160l-9 92H185z" fill="url(#sleeve)"/>
+<!-- soleil levant sur la manchette -->
+<g transform="translate(256 322)">
+ <path d="M-34 0a34 34 0 0 1 68 0z" fill="#f6c453"/>
+ <g stroke="#f6c453" stroke-width="6" stroke-linecap="round"><path d="M0-44v-12M-31-31l-8-8M31-31l8-8M-44 0h-10M44 0h10"/></g>
+ <path d="M-50 2h100" stroke="#fffaf2" stroke-width="5" stroke-linecap="round"/>
+</g>
+<!-- couvercle -->
+<rect x="150" y="150" width="212" height="32" rx="12" fill="url(#lid)"/>
+<path d="M176 150q8-26 30-26h100q22 0 30 26z" fill="url(#lid)"/>
+<rect x="232" y="128" width="48" height="10" rx="5" fill="#d9cdb8"/>
+<path d="M150 182h212" stroke="#d6cab5" stroke-width="3"/>
+</svg>

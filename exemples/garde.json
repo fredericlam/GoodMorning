@@ -1,0 +1,16 @@
+{
+  "enfants": ["Léa", "Tom"],
+  "weekendPapa": "2026-10-03",
+  "dimancheSoirChezPapa": ["Léa"],
+  "vacancesPremiereSemaine": "maman",
+  "vacances": {},
+  "exceptions": [],
+  "avatars": {
+    "Léa": { "cheveux": "#1c1720", "fleur": "#ff5fa2" },
+    "Tom": { "cheveux": "#7a4a2a", "fleur": "#ff9f43" }
+  },
+  "portraits": {
+    "papa": { "cheveux": "court", "couleurCheveux": "brun", "peau": "claire" },
+    "maman": { "cheveux": "long", "couleurCheveux": "châtain", "peau": "claire" }
+  }
+}

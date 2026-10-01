@@ -1,0 +1,6 @@
+[
+  { "prenom": "Léa", "source": "ecoledirecte", "theme": "sakura", "derniereAnnee": { "classe": "collège", "cycle": "collège · 3e" } },
+  { "prenom": "Tom", "source": "dossier", "dossier": "sources", "etablissement": "École élémentaire", "theme": "mandarine",
+    "anniversaire": "2016-05-20", "classe": "CM2", "derniereAnnee": { "classe": "CM2", "cycle": "primaire" } },
+  { "prenom": "Papa", "source": "papa", "theme": "laiton" }
+]

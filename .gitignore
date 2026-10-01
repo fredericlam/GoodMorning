@@ -1,0 +1,14 @@
+/out/
+.env
+.env.local
+*.state.json
+__pycache__/
+.venv/
+/evenements.json
+/sources/
+/archives/
+/PROMPT.md
+/espaces.json
+/garde.json
+/enseignants.json
+.DS_Store

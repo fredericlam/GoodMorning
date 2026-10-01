@@ -1,0 +1,5 @@
+{
+  "_aide": "Portraits (DiceBear, style au choix dans Archives › Enseignants). Clé = nom sans Mme/M. Traits : genre F|H ; cheveux long | mi-long | court | carré | chignon | couettes | frisé | ample | chauve | dégarni ; couleurCheveux blond | châtain | brun | noir | roux | gris | blanc ; yeux bleu | vert | marron | noir | gris ; regard fermés | ronds | bridés ; sourire dents ; nez gros ; peau claire | mate | foncée ; lunettes, barbe, moustache : true|false ; age (ex. 60+, retraite → cheveux gris) ; corpulence / visage : carré | costaud | surpoids | fine (Miniavs). « note » est libre.",
+  "DURAND": { "nom": "Mme Durand", "genre": "F", "cheveux": "long", "couleurCheveux": "blond", "yeux": "bleu" },
+  "MARTIN": { "nom": "M. Martin", "genre": "H", "cheveux": "court", "lunettes": true, "barbe": true }
+}
