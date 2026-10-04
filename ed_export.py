@@ -349,6 +349,7 @@ def norm_notes(raw):
         notes.append({
             "id": n.get("id"),
             "date": n.get("date"),
+            "saisie": n.get("dateSaisie") or None,  # date de saisie par l'enseignant (≠ date du devoir)
             "matiere": n.get("libelleMatiere") or n.get("codeMatiere"),
             "codeMatiere": n.get("codeMatiere"),
             "devoir": n.get("devoir"),
@@ -784,6 +785,7 @@ def fetch_famille(ed):
 
 
 MENU_BANDS = ["entrees", "plats", "accompagnements", "laitages", "desserts"]
+MENU_LEGEND = re.compile(r"^(produits? (locaux|bio|frais)|le produit maison|la s[ée]lection du chef)$", re.I)
 JOURS = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
 MOIS = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"]
 
@@ -805,7 +807,8 @@ def parse_menu_pdf(path, published):
     words = [(float(x0), float(y0), float(x1), html.unescape(w)) for x0, y0, x1, w in
              re.findall(r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="[\d.]+">([^<]*)</word>', words_html)]
     heads = {w: (x0 + x1) / 2 for x0, y0, x1, w in words if w in JOURS}
-    m = re.search(r"du\s+(\d{1,2})\s+(\w+)", " ".join(w for *_, w in words), re.I)
+    # « du 28 septembre au 2 octobre » ou « du 5 AU 9 OCTOBRE » (mois seulement après le 2e jour)
+    m = re.search(r"du\s+(\d{1,2})(?:er)?(?:\s+(?:au|-)\s+\d{1,2}(?:er)?)?\s+(\w+)", " ".join(w for *_, w in words), re.I)
     if len(heads) < 5 or not m or fold(m.group(2)) not in MOIS:
         return {}
     head_y = min(y0 for x0, y0, x1, w in words if w in JOURS)
@@ -846,8 +849,8 @@ def parse_menu_pdf(path, published):
         menu = {}
         for y, txt in zip(ys, rows):
             band = sum(1 for b in bounds if b < y) - 1 if bounds else -1
-            if bounds and not 0 <= band < len(MENU_BANDS):
-                continue  # légende sous le tableau (« Produit locaux… »)
+            if bounds and not 0 <= band < len(MENU_BANDS) or MENU_LEGEND.match(txt):
+                continue  # légende sous le tableau (« Produit locaux… »), parfois sans filet qui la sépare
             menu.setdefault(MENU_BANDS[band] if bounds else "plats", []).append(txt.capitalize())
         if menu:
             out[d] = menu
@@ -863,13 +866,16 @@ def cantine_menus():
     for m in (load_json(FAM / "messages_detail.json", {}) or {}).values():
         for a in (m or {}).get("files") or []:
             sources.append((f"pj/{a.get('id')}", a.get("libelle") or "", (m.get("date") or "")[:10]))
-    menus = {}
+    # cumul dans out/cantine.json : EcoleDirecte retire le menu de la semaine passée quand il publie le suivant
+    menus = load_json(OUT / "cantine.json", {}) or {}
     for key, label, published in sources:
         f = index.get(key)
         if not f or not re.search(r"menu", label, re.I) or f.get("mime") != "application/pdf" or not published:
             continue
         for d, menu in parse_menu_pdf(FILES / f["path"], published).items():
             menus[d] = {**menu, "source": label}
+    menus = dict(sorted(menus.items()))
+    write_json(OUT / "cantine.json", menus)
     return menus
 
 
@@ -1078,7 +1084,130 @@ def parse_lsu(path):
     return {**meta, "semestres": out} if out else None
 
 
+def parse_livret_lsu(path):
+    """Export « Livret scolaire » (PDF texte, tous les bilans de la scolarité) → périodes du primaire :
+    [{niveau, annee, periode, n, du, au, etablissement, enseignant, classe, pages, objectifs, appreciation, parcours}].
+    Les bilans collège du même export sont listés à part (niveau 6EME…3EME) pour signaler les doublons."""
+    import subprocess
+    first = subprocess.run(["pdftotext", "-f", "2", "-l", "3", "-layout", str(path), "-"], capture_output=True, text=True).stdout
+    total = int(re.search(r"Pages:\s+(\d+)", subprocess.run(["pdfinfo", str(path)], capture_output=True, text=True).stdout).group(1))
+    som = re.sub(r"\s+", " ", first.split("Académie")[0])
+    entries = [{"niveau": m[0].upper(), "periode": m[1].capitalize(), "n": int(m[2]), "annee": f"{m[3]}/{m[4]}",
+                "etablissement": re.sub(r"\s\d+\.\s", " ", f" {m[5]} ").strip().title(), "page": int(m[6])}  # « 16. » = n° de l'entrée suivante
+               for m in re.findall(r"Bilan périodique (\S+) (Trimestre|Semestre) (\d) (\d{4})/(\d{4}) .+? \((.+?)\) (\d+)", som)]
+    for i, e in enumerate(sorted(entries, key=lambda e: e["page"])):
+        nxt = sorted(entries, key=lambda e: e["page"])[i + 1]["page"] if i + 1 < len(entries) else total + 1
+        e["pages"] = [e["page"], nxt - 1]
+    lvl = lambda xc: LSU_NIVEAUX[0 if xc < 515 else 1 if xc < 535 else 2 if xc < 555 else 3]
+    tops = {"Français", "Mathématiques", "Enseignements artistiques", "Questionner le monde", "Langues vivantes", "Éducation physique et sportive",
+            "Sciences et technologie", "Histoire et géographie", "Enseignement moral et civique"}
+    for e in entries:
+        if re.match(r"\dEME$", e["niveau"]):
+            continue  # bilans collège : déjà archivés via les bulletins
+        words = _bbox_words(path, *e["pages"])
+        e.update(objectifs=[], appreciation="", parcours="", enseignant="", classe="")
+        disc, mode, last = None, None, None
+        for page in sorted({w[0] for w in words}):
+            pw = [w[1:] for w in words if w[0] == page]
+            lines = _lines(pw, ytol=3)
+            text = "\n".join(" ".join(w[4] for w in ws) for _, ws in lines)
+            if m := re.search(r"Enseignant\(e\)\(s\)\s*:\s*([^\n]+)", text): e["enseignant"] = m[1].strip()
+            if m := re.search(r"Classe de ([^\n]+)", text): e["classe"] = m[1].strip()
+            if m := re.search(r"(?:Semestre|Trimestre) \d du (\d\d/\d\d/\d{4}) au (\d\d/\d\d/\d{4})", text): e["du"], e["au"] = m[1], m[2]
+            head = max([w[1] for w in pw if w[4] in ("Dépassés", "Partiellement", "Domaines")] or [0]) + 12
+            stop = min([y for y, ws in lines if " ".join(w[4] for w in ws).strip().startswith(
+                ("Bilan de l", "Appréciation générale", "Parcours éducatifs", "Communication avec"))
+                or re.match(r"^[A-ZÀ-Ü' -]{3,60}\s\d{1,2}/\d{1,2}$", " ".join(w[4] for w in ws).strip())] or [1e9])  # + pied de page « NOM PRÉNOM 12/30 »
+            bullets = [w[0] for w in pw if w[4] == "-" and w[0] > 120 and head < w[1] < stop]
+            ox = (min(bullets) - 2) if bullets else 175
+            marks = sorted([w for w in pw if w[4] in ("X", "x") and w[0] > 495 and head < w[1] < stop], key=lambda w: w[1])
+            marks += [w for w in pw if w[4] == "Non" and w[0] > 480 and head < w[1] < stop
+                      and any(v[4].startswith("évalu") and abs(v[1] - w[1]) < 3 for v in pw)]
+            marks.sort(key=lambda w: w[1])
+            # blocs : lignes espacées de ~10 pt dans un bloc, ≥ 20 pt entre deux blocs ; un bloc = libellé (gauche) + objectifs + croix
+            rows = sorted(_lines([w for w in pw if w[0] < 495 and head < w[1] < stop], ytol=3), key=lambda r: r[0])
+            blocks = []
+            for y, ws in rows:
+                if not blocks or y - blocks[-1][-1][0] > 14: blocks.append([])
+                blocks[-1].append((y, ws))
+            for bl in blocks:
+                y0, y1 = bl[0][0], bl[-1][0]
+                dom = " ".join(" ".join(w[4] for w in ws if w[2] <= ox - 1) for _, ws in bl).strip()
+                objs = []
+                for _, ws in bl:
+                    t = " ".join(w[4] for w in ws if w[0] >= ox - 1)
+                    if not t: continue
+                    if t.startswith("- ") or not objs: objs.append(t[2:] if t.startswith("- ") else t)
+                    else: objs[-1] += " " + t
+                mk = next((m for m in marks if y0 - 6 <= m[1] <= y1 + 6), None)
+                if not objs and not mk:
+                    if dom: disc = dom  # en-tête de discipline (« Français », « Mathématiques »…)
+                    continue
+                if objs and not dom and not mk and last:  # suite d'un bloc coupé par le saut de page
+                    d, dm, niveau = last
+                else:
+                    if dom in tops or not disc: disc, d, dm = (dom or disc), (dom or disc), ""
+                    else: d, dm = disc, dom
+                    niveau = None if not mk or mk[4] == "Non" else lvl((mk[0] + mk[2]) / 2)
+                last = (d, dm, niveau)
+                for t in objs or [dom]:
+                    e["objectifs"].append({"discipline": d or "?", "domaine": dm, "objectif": t.strip(), "niveau": niveau})
+            # parcours et appréciation (après le tableau)
+            for y, ws in lines:
+                t = " ".join(w[4] for w in ws).strip()
+                if t.startswith("Parcours éducatifs"): mode = "par"; continue
+                if t.startswith("Appréciation générale"): mode = "app"; continue
+                if t.startswith("Communication avec") or re.match(r"^[A-Z' -]{3,60} \d{1,2}/\d{1,2}$", t): mode = None; continue
+                if mode == "par" and not t.startswith("Aucun parcours"): e["parcours"] = (e["parcours"] + " " + t).strip()
+                if mode == "app": e["appreciation"] = (e["appreciation"] + " " + t).strip()
+    return entries
+
+
+def cmd_livret(args):
+    """Livret scolaire complet (export PDF) → archives/<prénom>/ : ajoute seulement les périodes du primaire manquantes
+    (bilan.json + pages extraites) ; les bilans déjà présents (collège : bulletins ; primaire : bilan.json) sont des doublons."""
+    import shutil
+    import subprocess
+    import tempfile
+    src = Path(args.pdf).expanduser()
+    entries = parse_livret_lsu(src)
+    added, dup = [], []
+    for e in sorted(entries, key=lambda e: (e["annee"], e["n"])):
+        an = e["annee"].replace("/", "-")
+        if re.match(r"\dEME$", e["niveau"]):
+            dup.append(f"{e['niveau']} {e['periode']} {e['n']} {e['annee']} (bulletins collège déjà archivés)"); continue
+        ydir = ARCH / args.prenom / f"{an}_{e['niveau']}"
+        bf = ydir / "bilan.json"
+        if not bf.exists() and ydir.is_dir() and any(ydir.glob("*.pdf")):  # année déjà archivée autrement (livret scanné lu par parse_lsu)
+            dup.append(f"{e['niveau']} {e['periode']} {e['n']} {e['annee']} (année déjà archivée : {ydir.relative_to(ROOT)})"); continue
+        bilan = load_json(bf) or {"source": f"Extrait de {src.name} (livret scolaire), à corriger ici si besoin.", "annee": e["annee"],
+                                  "classe": e["niveau"], "enseignant": e["enseignant"].title(), "etablissement": e["etablissement"], "semestres": []}
+        bilan.setdefault("periode", e["periode"])
+        if any(p["semestre"] == e["n"] for p in bilan["semestres"]):
+            dup.append(f"{e['niveau']} {e['periode']} {e['n']} {e['annee']} (déjà dans {bf.relative_to(ROOT)})"); continue
+        bilan["semestres"].append({"semestre": e["n"], "du": e.get("du", ""), "au": e.get("au", ""), "enseignant": e["enseignant"].title(),
+                                   "objectifs": e["objectifs"], "commentaires": {}, "appreciation": e["appreciation"], "parcours": e["parcours"]})
+        bilan["semestres"].sort(key=lambda p: p["semestre"])
+        added.append(f"{e['niveau']} {e['periode']} {e['n']} {e['annee']} : {len(e['objectifs'])} objectifs, pages {e['pages'][0]}-{e['pages'][1]}")
+        if args.dry_run:
+            continue
+        ydir.mkdir(parents=True, exist_ok=True)
+        out = ydir / f"livret-{e['periode'].lower()}-{e['n']}.pdf"
+        # poppler râle sur la table xref de l'export (avertissements, code retour ≠ 0) mais produit des pages valides : on vérifie le fichier
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["pdfseparate", "-f", str(e["pages"][0]), "-l", str(e["pages"][1]), str(src), f"{tmp}/p-%03d.pdf"], capture_output=True)
+            parts = sorted(Path(tmp).glob("p-*.pdf"))
+            if len(parts) == 1: shutil.copy(parts[0], out)
+            elif parts: subprocess.run(["pdfunite", *map(str, parts), str(out)], capture_output=True)
+        if not out.is_file() or out.stat().st_size == 0:
+            sys.exit(f"extraction des pages {e['pages']} impossible ({out})")
+        write_json(bf, bilan)  # en dernier : une reprise après erreur ne prend pas la période pour un doublon
+    print("Ajouté" + (" (simulation)" if args.dry_run else "") + " :", *added or ["rien"], sep="\n  ", file=sys.stderr)
+    print("Doublons ignorés :", *dup or ["aucun"], sep="\n  ", file=sys.stderr)
+
+
 ARCH = ROOT / "archives"
+REVS = OUT / "revisions"  # fiches de révision par contrôle (PDF + index.json écrits à la main)
 
 
 def past_years(n=6):
@@ -1276,6 +1405,11 @@ def _rows(path):
 YES = {"oui", "o", "x", "1", "true", "vrai", "yes"}
 
 
+def data_url(path):
+    mime = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
+    return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
+
+
 def load_espaces():
     """espaces.json : [{prenom, source: "ecoledirecte"}, {prenom, source: "dossier", dossier, …}].
     Dossier : *menu*.pdf|csv|json → cantine ; *devoir*.csv|json → devoirs. Fichiers commençant par « _ » ignorés."""
@@ -1332,6 +1466,10 @@ def load_espaces():
         seen = set()
         devoirs = [d for d in sorted(devoirs, key=lambda d: d["date"])
                    if (k := (d["date"], d["matiere"], d["contenu"])) not in seen and not seen.add(k)]
+        # copines du jeu Squishy : photo de visage (option « vrais visages ») intégrée en data URL, fichier local non versionné
+        if e.get("copines"):
+            e["copines"] = [{**c, "visage": data_url(folder / c["visage"])} if c.get("visage") and (folder / c["visage"]).is_file()
+                            else {k: v for k, v in c.items() if k != "visage"} for c in e["copines"]]
         out.append({**e, "cantine": dict(sorted(cantine.items())), "devoirs": devoirs, "imports": imports})
     return out
 
@@ -1360,7 +1498,13 @@ def write_dashboard(children, semaine, path=None, **extra):
     extra.setdefault("cantine", cantine_menus())  # menus extraits des PDF « Menu … » (documents, PJ)
     extra.setdefault("espaces", load_espaces())
     extra.setdefault("archives", load_archives())
+    extra.setdefault("revisions", load_json(REVS / "index.json", []))
     extra.setdefault("enseignants", {k: v for k, v in (load_json(ROOT / "enseignants.json") or {}).items() if not k.startswith("_")})  # bulletins/livrets des années passées (archives/) + notes API passées  # espaces enfants hors EcoleDirecte (espaces.json + dossier d'import)
+    for c in children:  # dernier fetch de l'enfant = dump brut le plus récent (normalize ne le change pas)
+        dumps = [OUT / f"{c.get('prenom')}_{k}.json" for k in ("notes", "edt", "devoirs", "vie_scolaire")]
+        t = max((f.stat().st_mtime for f in dumps if f.exists()), default=None)
+        if t:
+            c["fetched_at"] = datetime.fromtimestamp(t).isoformat(timespec="seconds")
     write_json(path, {"generated_at": datetime.now().isoformat(timespec="seconds"),
                       "semaine": semaine, **extra, "children": children})
     print(f"OK → {path}", file=sys.stderr)
@@ -1429,7 +1573,7 @@ def cmd_demo(_args):
                 v = max(0, min(20, rnd.gauss(base, 2.5)))
                 avg = rnd.uniform(9, 14)
                 notes.append({
-                    "id": nid, "date": dt.isoformat(), "matiere": m, "codeMatiere": code,
+                    "id": nid, "date": dt.isoformat(), "saisie": (dt + timedelta(days=rnd.randint(0, 10))).isoformat(), "matiere": m, "codeMatiere": code,
                     "devoir": rnd.choice(["Contrôle chapitre 1", "Interro de vocabulaire", "DM n°2",
                                           "Évaluation commune", "Exposé", "TP noté"]),
                     "type": rnd.choice(["DS", "Ecrit", "ORAL", "Interrogation Ecrite", "Travaux Pratiques"]),
@@ -1642,7 +1786,11 @@ def cmd_serve(args):
     papa_token = hmac.new(papa_pass.encode(), b"espace-papa-v1", "sha256").hexdigest() if papa_pass else None
     PAPA_TTL = 8 * 3600
     fails = {"n": 0}
+    import subprocess
+    import threading
+    refreshing = threading.Lock()  # un seul « Mettre à jour » à la fois
     host = "0.0.0.0" if args.lan else "127.0.0.1"
+    started = datetime.now().isoformat(timespec="seconds")
     lan_url = f"http://{lan_ip()}:{args.port}/?k={token}" if args.lan else None
 
     class H(BaseHTTPRequestHandler):
@@ -1674,6 +1822,27 @@ def cmd_serve(args):
             ok, _ = self._authorized({})
             if not ok:
                 return self._json(401, {"erreur": "clé d'accès manquante"})
+            if url == "/refresh":
+                # bouton « Mettre à jour » : fetch (EcoleDirecte) ou normalize (espaces « dossier »), dans un sous-processus
+                n = int(self.headers.get("Content-Length") or 0)
+                try:
+                    mode = str(json.loads(self.rfile.read(min(n, 1024)) or b"{}").get("mode", ""))
+                except (ValueError, AttributeError):
+                    mode = ""
+                if args.demo or mode not in ("fetch", "normalize"):
+                    return self._json(400, {"erreur": "mise à jour indisponible"})
+                if not refreshing.acquire(blocking=False):
+                    return self._json(409, {"erreur": "mise à jour déjà en cours"})
+                try:
+                    # stdin fermé : si EcoleDirecte demande le QCM de double authentification, fetch s'arrête
+                    r = subprocess.run([sys.executable, str(Path(__file__).resolve()), mode], cwd=ROOT, stdin=subprocess.DEVNULL,
+                                       capture_output=True, text=True, timeout=300)
+                    out = (r.stderr + r.stdout).strip().splitlines()[-6:]
+                    return self._json(200 if r.returncode == 0 else 502, {"ok": r.returncode == 0, "sortie": out})
+                except subprocess.TimeoutExpired:
+                    return self._json(504, {"erreur": "délai dépassé (5 min)"})
+                finally:
+                    refreshing.release()
             if url == "/papa/logout":
                 return self._json(200, {"ok": True}, [("Set-Cookie", "edp=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict")])
             if url != "/papa/login":
@@ -1732,6 +1901,7 @@ def cmd_serve(args):
                     return self.send_error(404)
                 data.pop("famille", None)
                 data["papa"] = {"configure": bool(papa_pass) or args.demo}
+                data["serveur"] = {"lance": started}
                 return self._json(200, data, extra)
             if url == "/papa.json":
                 if not self._papa():
@@ -1745,6 +1915,11 @@ def cmd_serve(args):
                 index = load_json(FILES / "index.json", {})
                 entry = next((e for e in index.values() if e["path"] == url[7:]), None)
                 path, ctype = (FILES / entry["path"], entry["mime"] or "application/octet-stream") if entry else (None, None)
+            elif url.startswith("/revisions/") and not args.demo:
+                # uniquement les PDF listés dans revisions/index.json
+                name = url[len("/revisions/"):]
+                listed = {f["path"] for r in load_json(REVS / "index.json", []) or [] for f in r.get("fichiers", [])}
+                path, ctype = (REVS / name, "application/pdf") if name in listed else (None, None)
             elif url.startswith("/archives/") and not args.demo:
                 # PDF du dossier archives/ uniquement (chemin résolu puis vérifié : pas de traversée)
                 cand = (ARCH / url[len("/archives/"):]).resolve()
@@ -1778,6 +1953,9 @@ def main():
     sub.add_parser("normalize").set_defaults(fn=cmd_normalize)
     sub.add_parser("vacances").set_defaults(fn=cmd_vacances)
     sub.add_parser("demo").set_defaults(fn=cmd_demo)
+    lp = sub.add_parser("livret", help="importe un livret scolaire PDF complet dans archives/ (périodes manquantes seulement)")
+    lp.add_argument("pdf"); lp.add_argument("prenom"); lp.add_argument("--dry-run", action="store_true")
+    lp.set_defaults(fn=cmd_livret)
     sp = sub.add_parser("serve")
     sp.add_argument("--port", type=int, default=8765)
     sp.add_argument("--demo", action="store_true", help="sert out/demo.json au lieu de out/dashboard.json")

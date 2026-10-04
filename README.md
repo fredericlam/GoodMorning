@@ -105,8 +105,9 @@ Le premier run déclenche en général le **QCM de double authentification** (co
 | `python ed_export.py normalize` | Reconstruit `out/dashboard.json` depuis les dumps bruts, **sans réseau** (utile après une évolution de la normalisation) |
 | `python ed_export.py demo` | Écrit `out/demo.json` (2 enfants factices), sans toucher aux vraies données |
 | `python ed_export.py serve [--port 8765] [--demo] [--lan]` | Sert le dashboard sur `127.0.0.1` ; `--demo` sert `out/demo.json` ; `--lan` l'ouvre au réseau local (voir [iPad](#ipad--réseau-local)) |
+| `python ed_export.py livret <pdf> <Prénom> [--dry-run]` | Importe un export « Livret scolaire » complet (PDF texte) dans `archives/<Prénom>/` : ajoute seulement les périodes du primaire manquantes (`bilan.json` + pages extraites), liste les doublons |
 
-`serve` n'expose que deux routes : `/` → `dashboard/index.html` et `/data.json` → `out/dashboard.json`. Tout le reste renvoie 404.
+`serve` expose `/` → `dashboard/index.html` et `/data.json` → `out/dashboard.json`, plus quelques routes protégées par la même clé : `/papa.json`, `/files/…` et `/archives/…` (PDF indexés uniquement), `/revisions/…` (PDF listés dans `out/revisions/index.json`) et `POST /refresh` (bouton « Mettre à jour » : relance `fetch` ou `normalize`). Tout le reste renvoie 404.
 
 ## Configuration
 
